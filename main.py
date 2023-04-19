@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import os
 from datetime import datetime, timedelta
@@ -22,7 +23,7 @@ class Worksheet:
         df = pd.read_excel(path)
         # print(df)
         row_m, col_n = df.shape
-        drop_rows = 2
+        drop_rows = 5
         df.drop(list(range(drop_rows)), inplace=True)
         col_names = generateColumnNames(col_n)
         df.columns = col_names
@@ -89,6 +90,11 @@ class MyDoc():
         section.bottom_margin = Mm(12.7)
         section.header_distance = Mm(12.7)
         section.footer_distance = Mm(12.7)
+
+        document.styles['Normal'].font.name = u'Arial'  # 设置西文字体
+        document.styles['Normal'].font.size = Pt(11)
+        """ https://www.jianshu.com/p/8f15e3f2f9e6 """
+        document.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'楷体')  # 设置中文字体使用字体2->宋体
         self.doc = document
 
     def save(self):
@@ -154,10 +160,6 @@ def process_fund_rate(target_date, document):
 
     document.add_picture('fund_rate.png', width=Mm(135))
 
-    document.styles['Normal'].font.name = u'Arial'  # 设置西文字体
-    document.styles['Normal'].font.size = Pt(11)
-    """ https://www.jianshu.com/p/8f15e3f2f9e6 """
-    document.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'楷体')  # 设置中文字体使用字体2->宋体
     # cn_style = document.styles['Normal']
     # font = cn_style.font
     # font.name = 'kaiti'
@@ -203,6 +205,102 @@ def process_fund_rate(target_date, document):
                         run.bold = True
 
 
+def process_NCD_rate(target_date, document):
+    folder_path = 'C:/Users/JoshuaHo/Documents/New folder'
+    worksheet = Worksheet(os.path.join(folder_path, 'NCD利率.xlsx'))
+    b_cache_val = 0
+    for i in range(7, worksheet.df.shape[0]):
+        worksheet.df.iloc[i, worksheet.df.columns.get_loc('X')] = sum(
+            [worksheet.df.iloc[j]['L'] for j in range(i - 7, i)]) / 7
+        # worksheet.df.iloc[i, worksheet.df.columns.get_loc('K')] = sum(
+        #     [worksheet.df.iloc[j]['H'] for j in range(i - 7, i)]) / 7
+        if worksheet.df.iloc[i]['C'] > 0.01:
+            b_cache_val = worksheet.df.iloc[i]['C']
+        worksheet.df.iloc[i, worksheet.df.columns.get_loc('Y')] = b_cache_val
+        q_val = round(worksheet.df.iloc[i]['Q'], 2)
+        if q_val < 0.01:
+            q_val = np.NAN
+        worksheet.df.iloc[i, worksheet.df.columns.get_loc('Z')] = q_val
+
+    stop_row = worksheet.date2RowDict[formatDate(target_date)]
+    date_arr = worksheet.df['A'][:stop_row]
+    X_arr = worksheet.df['X'][:stop_row]
+    Y_arr = worksheet.df['Y'][:stop_row]
+    Z_arr = worksheet.df['Z'][:stop_row]
+    plt.rcParams["font.sans-serif"] = ["SimHei"]  # 设置字体
+    plt.rcParams["axes.unicode_minus"] = False
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+    # plt.gca().xaxis.set_major_locator(mdates.DayLocator())
+    plt.plot(date_arr, X_arr, label='1年AAA中短期票据(7DMA)', )
+    plt.plot(date_arr, Y_arr, '--', label='1年MLF')
+    plt.plot(date_arr, Z_arr, label='1年股份行同业存单发行利率')
+    plt.xlim(target_date - relativedelta(months=36), target_date)
+    plt.ylim(1.5, 4)
+    plt.gcf().autofmt_xdate()
+    plt.legend()
+    plt.savefig('ncd_rate1.png', dpi=100, bbox_inches='tight')
+    plt.show()
+
+    document.add_picture('ncd_rate1.png', width=Mm(135))
+    Y_today = worksheet.get_date_col(target_date, 'Y', True)
+    Y_minus1day = worksheet.get_date_col(target_date - timedelta(days=1), 'Y')
+    Y_minus1month = worksheet.get_date_col(target_date - relativedelta(months=1), 'Y')
+    Y_minus1year = worksheet.get_date_col(target_date - relativedelta(months=12), 'Y')
+    # print(B_today, B_today - B_minus1day, B_today - B_minus1month, B_today - B_minus1year)
+
+    Z_today = worksheet.get_date_col(target_date, 'Z', True)
+    Z_minus1day = worksheet.get_date_col(target_date - timedelta(days=1), 'Z')
+    Z_minus1month = worksheet.get_date_col(target_date - relativedelta(months=1), 'Z')
+    Z_minus1year = worksheet.get_date_col(target_date - relativedelta(months=12), 'Z')
+    # print(H_today, H_today - H_minus1day, H_today - H_minus1month, H_today - H_minus1year)
+
+    X_today = worksheet.get_date_col(target_date, 'X', True)
+    X_minus1day = worksheet.get_date_col(target_date - timedelta(days=1), 'X')
+    X_minus1month = worksheet.get_date_col(target_date - relativedelta(months=1), 'X')
+    X_minus1year = worksheet.get_date_col(target_date - relativedelta(months=12), 'X')
+    # print(I_today, I_today - I_minus1day, I_today - I_minus1month, I_today - I_minus1year)
+
+    table = document.add_table(rows=5, cols=4)
+    """ https://blog.csdn.net/Kwoky/article/details/112898690 """
+    table.style = 'Colorful Grid Accent 1'
+    hdr_cells = table.rows[0].cells
+    hdr_cells[1].text = '1年MLF利率（%）'
+    hdr_cells[2].text = '1年股份行同业存单发行利率（%）'
+    hdr_cells[3].text = '1年AAA中短期票据（%）'
+    row1 = table.rows[1].cells
+    row1[0].text = f'{target_date.month}/{target_date.day}当天值'
+    row1[1].text = format(Y_today, '.2f')
+    row1[2].text = format(Z_today, '.2f')
+    row1[3].text = format(X_today, '.2f')
+
+    row2 = table.rows[2].cells
+    row2[0].text = '单日变动值'
+    row2[1].text = format(Y_today - Y_minus1day, '.2f')
+    row2[2].text = format(Z_today - Z_minus1day, '.2f')
+    row2[3].text = format(X_today - X_minus1day, '.2f')
+
+    row3 = table.rows[3].cells
+    row3[0].text = '近一月变动值'
+    row3[1].text = format(Y_today - Y_minus1month, '.2f')
+    row3[2].text = format(Z_today - Z_minus1month, '.2f')
+    row3[3].text = format(X_today - X_minus1month, '.2f')
+
+    row4 = table.rows[4].cells
+    row4[0].text = '近一年变动值'
+    row4[1].text = format(Y_today - Y_minus1year, '.2f')
+    row4[2].text = format(Z_today - Z_minus1year, '.2f')
+    row4[3].text = format(X_today - X_minus1year, '.2f')
+
+    for i, row in enumerate(table.rows):
+        for j, cell in enumerate(row.cells):
+            paragraphs = cell.paragraphs
+            for paragraph in paragraphs:
+                paragraph.style = document.styles['Normal']
+                for run in paragraph.runs:
+                    if i == 0 or j == 0:
+                        run.bold = True
+
+
 def main():
     # cur_date = today()
     cur_date = datetime.now() - timedelta(days=2)
@@ -213,6 +311,8 @@ def main():
     # print(generateColumnNames(30))
     doc = MyDoc()
     process_fund_rate(cur_date, doc.doc)
+
+    process_NCD_rate(cur_date, doc.doc)
     doc.save()
 
 
